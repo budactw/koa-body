@@ -16,6 +16,8 @@
 
 const buddy = require('co-body');
 const forms = require('formidable');
+const parseString = require('xml2js').parseString;
+const raw = require('raw-body');
 const symbolUnparsed = require('./unparsed.js');
 
 /**
@@ -46,6 +48,7 @@ function requestbody(opts) {
   opts.urlencoded = 'urlencoded' in opts ? opts.urlencoded : true;
   opts.json = 'json' in opts ? opts.json : true;
   opts.text = 'text' in opts ? opts.text : true;
+  opts.xml = 'xml' in opts ? opts.xml : true;
   opts.encoding = 'encoding' in opts ? opts.encoding : 'utf-8';
   opts.jsonLimit = 'jsonLimit' in opts ? opts.jsonLimit : '1mb';
   opts.jsonStrict = 'jsonStrict' in opts ? opts.jsonStrict : true;
@@ -99,6 +102,10 @@ function requestbody(opts) {
           });
         } else if (opts.multipart && ctx.is('multipart')) {
           bodyPromise = formy(ctx, opts.formidable);
+        } else if (opts.xml && ctx.is('xml')) {
+          bodyPromise = parse(ctx.req, opts).then(data => {
+            return data;
+          })
         }
       } catch (parsingError) {
         if (typeof opts.onError === 'function') {
@@ -208,4 +215,33 @@ function formy(ctx, opts) {
     }
     form.parse(ctx.req);
   });
+}
+
+function convertXml2Json(str, options) {
+  return new Promise((resolve, reject) => {
+    parseString(str, options, (err, result) => {
+      err ? reject(err) : resolve(result)
+    })
+  })
+}
+
+function parse(request, options) {
+  options = Object.assign({
+    limit: '1mb',
+    encoding: 'utf8',
+    xmlOptions: {}
+  }, options)
+  const len = request.headers['content-length']
+  if (len) {
+    options.length = len
+  }
+  return raw(request, options)
+    .then(str => {
+      return convertXml2Json(str, options.xmlOptions).catch(err => {
+        err = typeof err === 'string' ? new Error(err) : err
+        err.status = 400
+        err.body = str
+        throw err
+      })
+    })
 }
